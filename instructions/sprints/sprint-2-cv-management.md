@@ -7,6 +7,8 @@
 ## Deliverables
 
 1. CV upload (PDF and DOCX support)
+<!-- @import "[TOC]" {cmd="toc" depthFrom=1 depthTo=6 orderedList=false} -->
+
 2. CV parsing to structured JSON
 3. CV list view with primary selection
 4. CV detail view with parsed sections
