@@ -1,42 +1,9 @@
-import { PDFParse } from 'pdf-parse';
-import * as mammoth from 'mammoth';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ParsedCV, EMPTY_PARSED_CV } from '@/types/cv';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-/**
- * Extract text content from a PDF or DOCX file buffer
- */
-export async function extractTextFromFile(
-  buffer: Buffer,
-  fileType: 'pdf' | 'docx'
-): Promise<string> {
-  try {
-    if (fileType === 'pdf') {
-      console.log('[PDF Extract] Buffer size:', buffer.length);
-      const pdfParser = new PDFParse(buffer);
-      const data = await pdfParser.getText();
-      console.log('[PDF Extract] Got text, length:', data.text?.length);
-      return data.text;
-    } else if (fileType === 'docx') {
-      const result = await mammoth.extractRawText({ buffer });
-      return result.value;
-    }
-    throw new Error(`Unsupported file type: ${fileType}`);
-  } catch (error) {
-    console.error('[Extract] Error extracting text:', error);
-    throw error;
-  }
-}
-
-/**
- * Parse raw CV text using Gemini AI to extract structured data
- */
-export async function parseWithGemini(rawText: string): Promise<ParsedCV> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
-
-  const prompt = `You are a CV/Resume parser. Extract structured information from the following CV text and return it as JSON.
+const PARSE_PROMPT = `You are a CV/Resume parser. Analyze this document and extract structured information as JSON.
 
 Return ONLY valid JSON (no markdown code blocks, no explanations) with this exact structure:
 {
@@ -51,7 +18,7 @@ Return ONLY valid JSON (no markdown code blocks, no explanations) with this exac
   "summary": "string (professional summary or objective)",
   "experience": [
     {
-      "id": "string (unique identifier)",
+      "id": "string (unique identifier like exp-1)",
       "company": "string",
       "title": "string",
       "location": "string",
@@ -64,7 +31,7 @@ Return ONLY valid JSON (no markdown code blocks, no explanations) with this exac
   ],
   "education": [
     {
-      "id": "string (unique identifier)",
+      "id": "string (unique identifier like edu-1)",
       "institution": "string",
       "degree": "string",
       "field": "string (field of study)",
@@ -78,7 +45,7 @@ Return ONLY valid JSON (no markdown code blocks, no explanations) with this exac
   "skills": ["string array of technical and soft skills"],
   "certifications": [
     {
-      "id": "string (unique identifier)",
+      "id": "string (unique identifier like cert-1)",
       "name": "string",
       "issuer": "string",
       "date": "string",
@@ -89,7 +56,7 @@ Return ONLY valid JSON (no markdown code blocks, no explanations) with this exac
   ],
   "projects": [
     {
-      "id": "string (unique identifier)",
+      "id": "string (unique identifier like proj-1)",
       "name": "string",
       "description": "string",
       "technologies": ["string array"],
@@ -104,20 +71,46 @@ Return ONLY valid JSON (no markdown code blocks, no explanations) with this exac
 
 Important rules:
 1. Generate unique IDs (use format like "exp-1", "edu-1", "cert-1", "proj-1")
-2. If a field is not found in the CV, use an empty string "" or empty array []
-3. Set "current" to true if the experience is ongoing (endDate contains "Present" or similar)
+2. If a field is not found, use an empty string "" or empty array []
+3. Set "current" to true if the experience is ongoing
 4. Extract ALL experience entries, education entries, and skills mentioned
-5. Return ONLY the JSON object, no other text
+5. Return ONLY the JSON object, no other text`;
 
-CV Text:
-${rawText}`;
-
+/**
+ * Parse a CV file using Gemini's native document understanding
+ */
+export async function parseCV(
+  buffer: Buffer,
+  fileType: 'pdf' | 'docx'
+): Promise<{ parsed: ParsedCV; success: boolean }> {
   try {
-    console.log('[Gemini] API Key present:', !!process.env.GEMINI_API_KEY);
-    const result = await model.generateContent(prompt);
+    console.log('[CV Parser] Starting Gemini parsing for:', fileType);
+    console.log('[CV Parser] API Key present:', !!process.env.GEMINI_API_KEY);
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    // Convert buffer to base64
+    const base64Data = buffer.toString('base64');
+
+    // Determine MIME type
+    const mimeType = fileType === 'pdf'
+      ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    // Send file directly to Gemini
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        },
+      },
+      { text: PARSE_PROMPT },
+    ]);
+
     const response = await result.response;
     let text = response.text();
-    console.log('[Gemini] Raw response length:', text?.length);
+    console.log('[CV Parser] Gemini response length:', text.length);
 
     // Strip markdown code blocks if present
     text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '');
@@ -125,35 +118,9 @@ ${rawText}`;
 
     const parsed = JSON.parse(text) as ParsedCV;
     parsed.parsing_success = true;
-    return parsed;
-  } catch (error) {
-    console.error('[Gemini] Parsing error:', error);
-    return { ...EMPTY_PARSED_CV, parsing_success: false };
-  }
-}
 
-/**
- * Main function to parse a CV file
- */
-export async function parseCV(
-  buffer: Buffer,
-  fileType: 'pdf' | 'docx'
-): Promise<{ parsed: ParsedCV; success: boolean }> {
-  try {
-    console.log('[CV Parser] Starting extraction for:', fileType);
-    const rawText = await extractTextFromFile(buffer, fileType);
-    console.log('[CV Parser] Extracted text length:', rawText?.length || 0);
-    console.log('[CV Parser] First 500 chars:', rawText?.slice(0, 500));
-
-    if (!rawText || rawText.trim().length === 0) {
-      console.error('[CV Parser] No text extracted from file');
-      return { parsed: EMPTY_PARSED_CV, success: false };
-    }
-
-    console.log('[CV Parser] Calling Gemini...');
-    const parsed = await parseWithGemini(rawText);
-    console.log('[CV Parser] Gemini result success:', parsed.parsing_success);
-    return { parsed, success: parsed.parsing_success };
+    console.log('[CV Parser] Successfully parsed CV');
+    return { parsed, success: true };
   } catch (error) {
     console.error('[CV Parser] Error:', error);
     return { parsed: EMPTY_PARSED_CV, success: false };
