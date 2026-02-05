@@ -194,3 +194,61 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 - File naming: kebab-case for files, PascalCase for components
 - Imports: Use `@/` alias for src directory
 - Types: Define in `types/` directory, import as needed
+
+---
+
+## Recent Changes Log
+
+### Master CV Edit Flow Improvements (Latest)
+
+**Date:** 2026-02-05
+
+**Changes Made:**
+1. **CVEditor Component** (`src/components/cv/cv-editor.tsx`):
+   - Removed auto-save (debounced save) behavior
+   - Added explicit "Save Changes" button with confirmation dialog
+   - Added "Unsaved changes" indicator when form is dirty
+   - Added sticky footer with Cancel/Save buttons
+   - Added confirmation dialog: "Update Master CV?" warning users this affects AI-tailored applications
+   - Added discard confirmation when canceling with unsaved changes
+   - New prop: `onCancel: () => void` to exit edit mode
+
+2. **CV Page** (`src/app/dashboard/cv/page.tsx`):
+   - Changed "Edit" button to "Edit Profile"
+   - Header buttons (Edit, Re-upload, Delete) only show in view mode
+   - In edit mode, editor has its own Cancel button to exit
+
+3. **CV Detail Page** (`src/app/dashboard/cv/[id]/page.tsx`):
+   - Added controlled tab state for view/edit switching
+   - Updated CVEditor call with `onCancel` prop
+
+4. **PDF Viewer** (`src/components/cv/pdf-viewer.tsx`):
+   - Changed label from "Original Document" to "Uploaded CV"
+
+**UI Flow:**
+```
+┌─────────────────────────────────────────────┐
+│ [Edit form fields...]                        │
+│                                              │
+├─────────────────────────────────────────────┤
+│ ⚠ Unsaved changes    [Cancel] [Save Changes]│  <- Sticky footer
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Resume Instructions
+
+**Current State:** Sprint 3 (Apply Mode) in progress
+
+**Dev Server:** Running on `http://localhost:3010`
+
+**To Resume Development:**
+1. Open terminal in project root
+2. Run `npm run dev` (if server not running)
+3. Test the CV edit flow at `/dashboard/cv`
+
+**Next Steps:**
+- Test the explicit save flow thoroughly
+- Continue with remaining Sprint 3 tasks (Apply Mode features)
+- Review `instructions/sprints/sprint-3-apply-mode.md` for task list

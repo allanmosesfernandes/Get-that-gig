@@ -20,6 +20,7 @@ export default function CVDetailPage() {
   const [cv, setCv] = useState<CV | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'view' | 'edit'>('view');
 
   useEffect(() => {
     const fetchCv = async () => {
@@ -171,7 +172,7 @@ export default function CVDetailPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="view" className="w-full">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'view' | 'edit')} className="w-full">
         <TabsList>
           <TabsTrigger value="view">View</TabsTrigger>
           <TabsTrigger value="edit">Edit</TabsTrigger>
@@ -184,6 +185,7 @@ export default function CVDetailPage() {
             cvId={cv.id}
             initialContent={parsedContent}
             onSave={handleSave}
+            onCancel={() => setActiveTab('view')}
           />
         </TabsContent>
       </Tabs>

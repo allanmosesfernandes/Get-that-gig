@@ -1,15 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
-import { useDebouncedCallback } from 'use-debounce';
-import { Plus, Trash2, Loader2, Check, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Loader2, GripVertical, AlertTriangle } from 'lucide-react';
 import { ParsedCV } from '@/types/cv';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -20,17 +17,28 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface CVEditorProps {
   cvId: string;
   initialContent: ParsedCV;
   onSave: (content: ParsedCV) => Promise<void>;
+  onCancel: () => void;
 }
 
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
-
-export function CVEditor({ cvId, initialContent, onSave }: CVEditorProps) {
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+export function CVEditor({ cvId, initialContent, onSave, onCancel }: CVEditorProps) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [skillInput, setSkillInput] = useState('');
   const [languageInput, setLanguageInput] = useState('');
 
@@ -74,27 +82,39 @@ export function CVEditor({ cvId, initialContent, onSave }: CVEditorProps) {
     name: 'projects',
   });
 
-  const debouncedSave = useDebouncedCallback(async (data: ParsedCV) => {
-    setSaveStatus('saving');
+  const isDirty = form.formState.isDirty;
+
+  const handleSaveClick = () => {
+    setShowSaveDialog(true);
+  };
+
+  const handleConfirmSave = async () => {
+    setShowSaveDialog(false);
+    setIsSaving(true);
     try {
+      const data = form.getValues();
       await onSave(data);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
+      form.reset(data);
+      onCancel();
     } catch (error) {
       console.error('Save error:', error);
-      setSaveStatus('error');
+    } finally {
+      setIsSaving(false);
     }
-  }, 1000);
+  };
 
-  // Watch for form changes and auto-save
-  useEffect(() => {
-    const subscription = form.watch((data) => {
-      if (form.formState.isDirty) {
-        debouncedSave(data as ParsedCV);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [form, debouncedSave]);
+  const handleCancelClick = () => {
+    if (isDirty) {
+      setShowCancelDialog(true);
+    } else {
+      onCancel();
+    }
+  };
+
+  const handleConfirmCancel = () => {
+    setShowCancelDialog(false);
+    onCancel();
+  };
 
   const handleAddSkill = useCallback(() => {
     if (skillInput.trim()) {
@@ -148,26 +168,7 @@ export function CVEditor({ cvId, initialContent, onSave }: CVEditorProps) {
 
   return (
     <Form {...form}>
-      <form className="space-y-6">
-        {/* Save Status Indicator */}
-        <div className="flex items-center justify-end gap-2 text-sm">
-          {saveStatus === 'saving' && (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-muted-foreground">Saving...</span>
-            </>
-          )}
-          {saveStatus === 'saved' && (
-            <>
-              <Check className="h-4 w-4 text-green-500" />
-              <span className="text-green-500">Saved</span>
-            </>
-          )}
-          {saveStatus === 'error' && (
-            <span className="text-destructive">Error saving changes</span>
-          )}
-        </div>
-
+      <form className="space-y-6 pb-20">
         {/* Contact Information */}
         <Card>
           <CardHeader>
@@ -814,6 +815,77 @@ export function CVEditor({ cvId, initialContent, onSave }: CVEditorProps) {
           </CardContent>
         </Card>
       </form>
+
+      {/* Sticky Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 z-50">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            {isDirty && (
+              <>
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <span className="text-amber-500">Unsaved changes</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancelClick}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveClick}
+              disabled={isSaving || !isDirty}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Confirmation Dialog */}
+      <AlertDialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update Master CV?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your Master CV is the foundation for all AI-tailored job applications.
+              Any changes you save here will be used when generating customized CVs for future applications.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSave}>Save Changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel Confirmation Dialog */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes that will be lost if you leave now.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmCancel}>Discard Changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Form>
   );
 }
