@@ -1,34 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useForm, useFieldArray } from 'react-hook-form';
 import {
   Upload,
   FileText,
   Loader2,
-  Pencil,
-  User,
-  Mail,
-  Phone,
-  MapPin,
-  Linkedin,
-  Globe,
-  Briefcase,
-  GraduationCap,
-  Award,
-  FolderGit2,
-  Languages,
+  Plus,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { CV, ParsedCV } from '@/types/cv';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
-import { CollapsibleCVSection } from '@/components/cv/collapsible-cv-section';
-import { CVEditor } from '@/components/cv/cv-editor';
-import { PDFViewer } from '@/components/cv/pdf-viewer';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+} from '@/components/ui/form';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,16 +35,84 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-
-type ViewMode = 'view' | 'edit';
+import { CVCompletenessBar, calculateCompleteness } from '@/components/cv/cv-completeness-bar';
+import { CVFormSection } from '@/components/cv/cv-form-section';
+import { ExperienceEntry } from '@/components/cv/experience-entry';
+import { EducationEntry } from '@/components/cv/education-entry';
+import { PDFViewer } from '@/components/cv/pdf-viewer';
 
 export default function CVPage() {
-  const router = useRouter();
   const [cv, setCv] = useState<CV | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('view');
+  const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [skillInput, setSkillInput] = useState('');
+  const [languageInput, setLanguageInput] = useState('');
+
+  const form = useForm<ParsedCV>({
+    defaultValues: {
+      contact: {
+        fullName: '',
+        email: '',
+        phone: '',
+        location: '',
+        linkedIn: '',
+        website: '',
+      },
+      summary: '',
+      experience: [],
+      education: [],
+      skills: [],
+      certifications: [],
+      projects: [],
+      languages: [],
+      parsing_success: false,
+    },
+  });
+
+  const {
+    fields: experienceFields,
+    append: appendExperience,
+    remove: removeExperience,
+  } = useFieldArray({
+    control: form.control,
+    name: 'experience',
+  });
+
+  const {
+    fields: educationFields,
+    append: appendEducation,
+    remove: removeEducation,
+  } = useFieldArray({
+    control: form.control,
+    name: 'education',
+  });
+
+  const {
+    fields: certificationFields,
+    append: appendCertification,
+    remove: removeCertification,
+  } = useFieldArray({
+    control: form.control,
+    name: 'certifications',
+  });
+
+  const {
+    fields: projectFields,
+    append: appendProject,
+    remove: removeProject,
+  } = useFieldArray({
+    control: form.control,
+    name: 'projects',
+  });
+
+  const isDirty = form.formState.isDirty;
+  const watchedValues = form.watch();
+  const summary = form.watch('summary');
+  const summaryLength = summary?.length || 0;
 
   const fetchCv = async () => {
     try {
@@ -62,6 +125,9 @@ export default function CVPage() {
       }
 
       setCv(data.cv);
+      if (data.cv?.parsed_content) {
+        form.reset(data.cv.parsed_content);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -73,21 +139,49 @@ export default function CVPage() {
     fetchCv();
   }, []);
 
-  const handleSave = async (content: ParsedCV) => {
+  const handleSaveClick = () => {
+    setShowSaveDialog(true);
+  };
+
+  const handleConfirmSave = async () => {
     if (!cv) return;
 
-    const response = await fetch(`/api/cv/${cv.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parsed_content: content }),
-    });
+    setShowSaveDialog(false);
+    setIsSaving(true);
+    try {
+      const data = form.getValues();
+      const response = await fetch(`/api/cv/${cv.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parsed_content: data }),
+      });
 
-    if (!response.ok) {
-      throw new Error('Failed to save changes');
+      if (!response.ok) {
+        throw new Error('Failed to save changes');
+      }
+
+      const result = await response.json();
+      setCv(result.cv);
+      form.reset(data);
+    } catch (error) {
+      console.error('Save error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setIsSaving(false);
     }
+  };
 
-    const data = await response.json();
-    setCv(data.cv);
+  const handleCancelClick = () => {
+    if (isDirty) {
+      setShowCancelDialog(true);
+    }
+  };
+
+  const handleConfirmCancel = () => {
+    setShowCancelDialog(false);
+    if (cv?.parsed_content) {
+      form.reset(cv.parsed_content);
+    }
   };
 
   const handleDelete = async () => {
@@ -111,6 +205,67 @@ export default function CVPage() {
       setIsDeleting(false);
     }
   };
+
+  const handleAddSkill = useCallback(() => {
+    if (skillInput.trim()) {
+      const currentSkills = form.getValues('skills') || [];
+      if (!currentSkills.includes(skillInput.trim())) {
+        form.setValue('skills', [...currentSkills, skillInput.trim()], {
+          shouldDirty: true,
+        });
+      }
+      setSkillInput('');
+    }
+  }, [skillInput, form]);
+
+  const handleRemoveSkill = useCallback(
+    (skillToRemove: string) => {
+      const currentSkills = form.getValues('skills') || [];
+      form.setValue(
+        'skills',
+        currentSkills.filter((s) => s !== skillToRemove),
+        { shouldDirty: true }
+      );
+    },
+    [form]
+  );
+
+  const handleAddLanguage = useCallback(() => {
+    if (languageInput.trim()) {
+      const currentLanguages = form.getValues('languages') || [];
+      if (!currentLanguages.includes(languageInput.trim())) {
+        form.setValue('languages', [...currentLanguages, languageInput.trim()], {
+          shouldDirty: true,
+        });
+      }
+      setLanguageInput('');
+    }
+  }, [languageInput, form]);
+
+  const handleRemoveLanguage = useCallback(
+    (languageToRemove: string) => {
+      const currentLanguages = form.getValues('languages') || [];
+      form.setValue(
+        'languages',
+        currentLanguages.filter((l) => l !== languageToRemove),
+        { shouldDirty: true }
+      );
+    },
+    [form]
+  );
+
+  const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  const getSummaryStatus = () => {
+    if (summaryLength === 0) return { color: 'text-muted-foreground', text: '0 characters' };
+    if (summaryLength < 200) return { color: 'text-orange-500', text: `${summaryLength} characters (too short)` };
+    if (summaryLength < 400) return { color: 'text-yellow-500', text: `${summaryLength} characters (getting there)` };
+    if (summaryLength <= 600) return { color: 'text-green-500', text: `${summaryLength} characters (ideal)` };
+    if (summaryLength <= 800) return { color: 'text-yellow-500', text: `${summaryLength} characters (a bit long)` };
+    return { color: 'text-orange-500', text: `${summaryLength} characters (too long)` };
+  };
+
+  const summaryStatus = getSummaryStatus();
 
   if (isLoading) {
     return (
@@ -157,294 +312,6 @@ export default function CVPage() {
     );
   }
 
-  const parsedContent = cv.parsed_content;
-
-  // Render the parsed CV content (used in both view modes)
-  const renderParsedContent = () => (
-    <div className="space-y-4">
-      {/* Contact Information */}
-      <CollapsibleCVSection
-        title="Contact Information"
-        icon={<User className="h-5 w-5" />}
-        defaultOpen={true}
-      >
-        <div className="grid gap-4 md:grid-cols-2 pt-2">
-          {parsedContent.contact.fullName && (
-            <div className="flex items-center gap-2">
-              <User className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{parsedContent.contact.fullName}</span>
-            </div>
-          )}
-          {parsedContent.contact.email && (
-            <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-muted-foreground" />
-              <a href={`mailto:${parsedContent.contact.email}`} className="text-primary hover:underline">
-                {parsedContent.contact.email}
-              </a>
-            </div>
-          )}
-          {parsedContent.contact.phone && (
-            <div className="flex items-center gap-2">
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span>{parsedContent.contact.phone}</span>
-            </div>
-          )}
-          {parsedContent.contact.location && (
-            <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span>{parsedContent.contact.location}</span>
-            </div>
-          )}
-          {parsedContent.contact.linkedIn && (
-            <div className="flex items-center gap-2">
-              <Linkedin className="h-4 w-4 text-muted-foreground" />
-              <a
-                href={parsedContent.contact.linkedIn}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                LinkedIn
-              </a>
-            </div>
-          )}
-          {parsedContent.contact.website && (
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4 text-muted-foreground" />
-              <a
-                href={parsedContent.contact.website}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                Website
-              </a>
-            </div>
-          )}
-        </div>
-      </CollapsibleCVSection>
-
-      {/* Summary */}
-      {parsedContent.summary && (
-        <CollapsibleCVSection
-          title="Summary"
-          defaultOpen={true}
-        >
-          <p className="text-muted-foreground whitespace-pre-wrap pt-2">
-            {parsedContent.summary}
-          </p>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Experience */}
-      {parsedContent.experience.length > 0 && (
-        <CollapsibleCVSection
-          title="Experience"
-          icon={<Briefcase className="h-5 w-5" />}
-          badge={<Badge variant="secondary">{parsedContent.experience.length}</Badge>}
-          defaultOpen={true}
-        >
-          <div className="space-y-6 pt-2">
-            {parsedContent.experience.map((exp, index) => (
-              <div key={exp.id || index}>
-                {index > 0 && <Separator className="my-4" />}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h4 className="font-semibold">{exp.title}</h4>
-                    <span className="text-sm text-muted-foreground">
-                      {exp.startDate} - {exp.current ? 'Present' : exp.endDate}
-                    </span>
-                  </div>
-                  <p className="text-muted-foreground">
-                    {exp.company}
-                    {exp.location && ` \u2022 ${exp.location}`}
-                  </p>
-                  {exp.description && (
-                    <p className="text-sm whitespace-pre-wrap">{exp.description}</p>
-                  )}
-                  {exp.highlights.length > 0 && (
-                    <ul className="list-disc list-inside text-sm space-y-1">
-                      {exp.highlights.map((highlight, i) => (
-                        <li key={i}>{highlight}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Education */}
-      {parsedContent.education.length > 0 && (
-        <CollapsibleCVSection
-          title="Education"
-          icon={<GraduationCap className="h-5 w-5" />}
-          badge={<Badge variant="secondary">{parsedContent.education.length}</Badge>}
-          defaultOpen={true}
-        >
-          <div className="space-y-6 pt-2">
-            {parsedContent.education.map((edu, index) => (
-              <div key={edu.id || index}>
-                {index > 0 && <Separator className="my-4" />}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h4 className="font-semibold">
-                      {edu.degree}
-                      {edu.field && ` in ${edu.field}`}
-                    </h4>
-                    <span className="text-sm text-muted-foreground">
-                      {edu.startDate} - {edu.endDate}
-                    </span>
-                  </div>
-                  <p className="text-muted-foreground">
-                    {edu.institution}
-                    {edu.location && ` \u2022 ${edu.location}`}
-                  </p>
-                  {edu.gpa && <p className="text-sm">GPA: {edu.gpa}</p>}
-                  {edu.highlights.length > 0 && (
-                    <ul className="list-disc list-inside text-sm space-y-1">
-                      {edu.highlights.map((highlight, i) => (
-                        <li key={i}>{highlight}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Skills */}
-      {parsedContent.skills.length > 0 && (
-        <CollapsibleCVSection
-          title="Skills"
-          badge={<Badge variant="secondary">{parsedContent.skills.length}</Badge>}
-          defaultOpen={true}
-        >
-          <div className="flex flex-wrap gap-2 pt-2">
-            {parsedContent.skills.map((skill, index) => (
-              <Badge key={index} variant="secondary">
-                {skill}
-              </Badge>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Certifications */}
-      {parsedContent.certifications.length > 0 && (
-        <CollapsibleCVSection
-          title="Certifications"
-          icon={<Award className="h-5 w-5" />}
-          badge={<Badge variant="secondary">{parsedContent.certifications.length}</Badge>}
-          defaultOpen={false}
-        >
-          <div className="space-y-4 pt-2">
-            {parsedContent.certifications.map((cert, index) => (
-              <div key={cert.id || index}>
-                {index > 0 && <Separator className="my-4" />}
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h4 className="font-semibold">{cert.name}</h4>
-                    {cert.date && (
-                      <span className="text-sm text-muted-foreground">{cert.date}</span>
-                    )}
-                  </div>
-                  <p className="text-muted-foreground">{cert.issuer}</p>
-                  {cert.credentialId && (
-                    <p className="text-sm">Credential ID: {cert.credentialId}</p>
-                  )}
-                  {cert.url && (
-                    <a
-                      href={cert.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline"
-                    >
-                      Verify Credential
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Projects */}
-      {parsedContent.projects.length > 0 && (
-        <CollapsibleCVSection
-          title="Projects"
-          icon={<FolderGit2 className="h-5 w-5" />}
-          badge={<Badge variant="secondary">{parsedContent.projects.length}</Badge>}
-          defaultOpen={false}
-        >
-          <div className="space-y-6 pt-2">
-            {parsedContent.projects.map((project, index) => (
-              <div key={project.id || index}>
-                {index > 0 && <Separator className="my-4" />}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h4 className="font-semibold">{project.name}</h4>
-                    {(project.startDate || project.endDate) && (
-                      <span className="text-sm text-muted-foreground">
-                        {project.startDate}
-                        {project.endDate && ` - ${project.endDate}`}
-                      </span>
-                    )}
-                  </div>
-                  {project.description && (
-                    <p className="text-sm whitespace-pre-wrap">{project.description}</p>
-                  )}
-                  {project.technologies.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {project.technologies.map((tech, i) => (
-                        <Badge key={i} variant="outline" className="text-xs">
-                          {tech}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {project.url && (
-                    <a
-                      href={project.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline"
-                    >
-                      View Project
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-
-      {/* Languages */}
-      {parsedContent.languages.length > 0 && (
-        <CollapsibleCVSection
-          title="Languages"
-          icon={<Languages className="h-5 w-5" />}
-          badge={<Badge variant="secondary">{parsedContent.languages.length}</Badge>}
-          defaultOpen={false}
-        >
-          <div className="flex flex-wrap gap-2 pt-2">
-            {parsedContent.languages.map((language, index) => (
-              <Badge key={index} variant="secondary">
-                {language}
-              </Badge>
-            ))}
-          </div>
-        </CollapsibleCVSection>
-      )}
-    </div>
-  );
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -456,48 +323,35 @@ export default function CVPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {viewMode === 'view' && (
-            <>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setViewMode('edit')}
-              >
-                <Pencil className="h-4 w-4 mr-2" />
-                Edit Profile
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/dashboard/cv/upload">
+              <Upload className="h-4 w-4 mr-2" />
+              Re-upload
+            </Link>
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={isDeleting}>
+                {isDeleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
               </Button>
-              <Separator orientation="vertical" className="h-6" />
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/dashboard/cv/upload">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Re-upload
-                </Link>
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm" disabled={isDeleting}>
-                    {isDeleting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete CV?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This action cannot be undone. Your CV and all associated data will be permanently deleted.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </>
-          )}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete CV?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. Your CV and all associated data will be permanently deleted.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
@@ -509,18 +363,580 @@ export default function CVPage() {
 
       {/* 60/40 Split Layout */}
       <div className="flex gap-6 min-h-[calc(100vh-220px)]">
-        {/* Left side - 60% - Parsed content or Editor */}
-        <div className="w-[60%] overflow-y-auto pr-2">
-          {viewMode === 'edit' ? (
-            <CVEditor
-              cvId={cv.id}
-              initialContent={parsedContent}
-              onSave={handleSave}
-              onCancel={() => setViewMode('view')}
-            />
-          ) : (
-            renderParsedContent()
-          )}
+        {/* Left side - 60% - Always-editable form */}
+        <div className="w-[60%] overflow-y-auto pr-2 pb-24">
+          <Form {...form}>
+            <form className="space-y-6">
+              {/* Completeness Bar */}
+              <CVCompletenessBar content={watchedValues} />
+
+              {/* Personal Details */}
+              <CVFormSection
+                title="Personal Details"
+                description="Add your contact information so employers can reach you"
+                badge={
+                  <Badge variant="outline" className="text-xs font-normal">
+                    +{Math.round(calculateCompleteness({ ...watchedValues, summary: '', experience: [], education: [], skills: [] }) / 20 * 20)}%
+                  </Badge>
+                }
+                defaultOpen={true}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="contact.fullName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Full Name</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="John Doe"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="contact.email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="email"
+                            placeholder="john@example.com"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="contact.phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="+1 (555) 123-4567"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="contact.location"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Location</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="San Francisco, CA"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </CVFormSection>
+
+              {/* Professional Summary */}
+              <CVFormSection
+                title="Professional Summary"
+                description="Write 2-4 short sentences that highlight your strengths and experience"
+                defaultOpen={true}
+              >
+                <FormField
+                  control={form.control}
+                  name="summary"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Textarea
+                          placeholder="A brief summary of your professional background, key skills, and career goals..."
+                          className="min-h-[120px] bg-muted/50"
+                          {...field}
+                        />
+                      </FormControl>
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-muted-foreground">
+                          Tip: Recruiters spend 6 seconds on average looking at a CV
+                        </p>
+                        <span className={`text-xs ${summaryStatus.color}`}>
+                          {summaryStatus.text}
+                        </span>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </CVFormSection>
+
+              {/* Professional Experience */}
+              <CVFormSection
+                title="Professional Experience"
+                description="Add your relevant work experience, starting with the most recent"
+                badge={
+                  experienceFields.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {experienceFields.length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={true}
+              >
+                <div className="space-y-3">
+                  {experienceFields.map((field, index) => (
+                    <ExperienceEntry
+                      key={field.id}
+                      index={index}
+                      field={field}
+                      form={form}
+                      onRemove={() => removeExperience(index)}
+                    />
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-dashed"
+                    onClick={() =>
+                      appendExperience({
+                        id: generateId(),
+                        company: '',
+                        title: '',
+                        location: '',
+                        startDate: '',
+                        endDate: '',
+                        current: false,
+                        description: '',
+                        highlights: [],
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add one more employment
+                  </Button>
+                </div>
+              </CVFormSection>
+
+              {/* Education */}
+              <CVFormSection
+                title="Education"
+                description="Add your educational background"
+                badge={
+                  educationFields.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {educationFields.length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={true}
+              >
+                <div className="space-y-3">
+                  {educationFields.map((field, index) => (
+                    <EducationEntry
+                      key={field.id}
+                      index={index}
+                      field={field}
+                      form={form}
+                      onRemove={() => removeEducation(index)}
+                    />
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-dashed"
+                    onClick={() =>
+                      appendEducation({
+                        id: generateId(),
+                        institution: '',
+                        degree: '',
+                        field: '',
+                        location: '',
+                        startDate: '',
+                        endDate: '',
+                        gpa: '',
+                        highlights: [],
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add one more education
+                  </Button>
+                </div>
+              </CVFormSection>
+
+              {/* Skills */}
+              <CVFormSection
+                title="Skills"
+                description="Add skills that are relevant to the jobs you're applying for"
+                badge={
+                  form.watch('skills')?.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {form.watch('skills').length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={true}
+              >
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Add a skill (e.g. JavaScript, Project Management)"
+                      value={skillInput}
+                      onChange={(e) => setSkillInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddSkill();
+                        }
+                      }}
+                      className="bg-muted/50"
+                    />
+                    <Button type="button" onClick={handleAddSkill} size="icon">
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {form.watch('skills')?.map((skill, index) => (
+                      <Badge key={index} variant="secondary" className="gap-1 py-1.5 px-3">
+                        {skill}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSkill(skill)}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          ×
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                  {form.watch('skills')?.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No skills added yet. Press Enter or click + to add.
+                    </p>
+                  )}
+                </div>
+              </CVFormSection>
+
+              {/* Websites & Social Links */}
+              <CVFormSection
+                title="Websites & Social Links"
+                description="Add your professional online presence"
+                defaultOpen={false}
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="contact.linkedIn"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>LinkedIn</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="https://linkedin.com/in/johndoe"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="contact.website"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Personal Website</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="https://johndoe.com"
+                            className="bg-muted/50"
+                            {...field}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </CVFormSection>
+
+              {/* Certifications */}
+              <CVFormSection
+                title="Certifications"
+                description="Add any professional certifications you've earned"
+                badge={
+                  certificationFields.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {certificationFields.length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={false}
+              >
+                <div className="space-y-4">
+                  {certificationFields.map((field, index) => (
+                    <div key={field.id} className="border rounded-lg p-4 space-y-4 bg-muted/30">
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeCertification(index)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <FormField
+                          control={form.control}
+                          name={`certifications.${index}.name`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Certification Name</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="AWS Solutions Architect"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`certifications.${index}.issuer`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Issuer</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="Amazon Web Services"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`certifications.${index}.date`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Date Issued</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="Jan 2023"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`certifications.${index}.credentialId`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Credential ID</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="ABC123XYZ"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-dashed"
+                    onClick={() =>
+                      appendCertification({
+                        id: generateId(),
+                        name: '',
+                        issuer: '',
+                        date: '',
+                        expiryDate: '',
+                        credentialId: '',
+                        url: '',
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add certification
+                  </Button>
+                </div>
+              </CVFormSection>
+
+              {/* Projects */}
+              <CVFormSection
+                title="Projects"
+                description="Showcase personal or professional projects"
+                badge={
+                  projectFields.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {projectFields.length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={false}
+              >
+                <div className="space-y-4">
+                  {projectFields.map((field, index) => (
+                    <div key={field.id} className="border rounded-lg p-4 space-y-4 bg-muted/30">
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeProject(index)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <FormField
+                          control={form.control}
+                          name={`projects.${index}.name`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Project Name</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="My Awesome Project"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`projects.${index}.url`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Project URL</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="https://github.com/user/project"
+                                  className="bg-background"
+                                  {...field}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name={`projects.${index}.description`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Description</FormLabel>
+                            <FormControl>
+                              <Textarea
+                                placeholder="Describe your project..."
+                                className="min-h-[80px] bg-background"
+                                {...field}
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full border-dashed"
+                    onClick={() =>
+                      appendProject({
+                        id: generateId(),
+                        name: '',
+                        description: '',
+                        technologies: [],
+                        url: '',
+                        startDate: '',
+                        endDate: '',
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add project
+                  </Button>
+                </div>
+              </CVFormSection>
+
+              {/* Languages */}
+              <CVFormSection
+                title="Languages"
+                description="Add languages you speak"
+                badge={
+                  form.watch('languages')?.length > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {form.watch('languages').length}
+                    </Badge>
+                  ) : undefined
+                }
+                defaultOpen={false}
+              >
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Add a language (e.g. English, Spanish)"
+                      value={languageInput}
+                      onChange={(e) => setLanguageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddLanguage();
+                        }
+                      }}
+                      className="bg-muted/50"
+                    />
+                    <Button type="button" onClick={handleAddLanguage} size="icon">
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {form.watch('languages')?.map((language, index) => (
+                      <Badge key={index} variant="secondary" className="gap-1 py-1.5 px-3">
+                        {language}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLanguage(language)}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          ×
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </CVFormSection>
+            </form>
+          </Form>
         </div>
 
         {/* Right side - 40% - PDF Preview */}
@@ -528,6 +944,79 @@ export default function CVPage() {
           <PDFViewer cvId={cv.id} filename={cv.original_filename} />
         </div>
       </div>
+
+      {/* Sticky Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 z-50">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            {isDirty && (
+              <>
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <span className="text-amber-500">Unsaved changes</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {isDirty && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCancelClick}
+                disabled={isSaving}
+              >
+                Discard Changes
+              </Button>
+            )}
+            <Button
+              type="button"
+              onClick={handleSaveClick}
+              disabled={isSaving || !isDirty}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Confirmation Dialog */}
+      <AlertDialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update Master CV?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your Master CV is the foundation for all AI-tailored job applications.
+              Any changes you save here will be used when generating customized CVs for future applications.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSave}>Save Changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Discard Confirmation Dialog */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes that will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmCancel}>Discard Changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

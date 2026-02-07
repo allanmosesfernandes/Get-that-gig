@@ -1,6 +1,6 @@
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/server';
+import { supabaseAdmin, getOrCreateUser } from '@/lib/supabase/server';
 import { parseCV } from '@/lib/cv-parser';
 import { MAX_FILE_SIZE, ALLOWED_EXTENSIONS } from '@/lib/validators/cv';
 
@@ -15,15 +15,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get user's internal ID from clerk_id
-    const { data: user, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('id, subscription_tier')
-      .eq('clerk_id', userId)
-      .single();
+    // Get or create user in Supabase
+    const { user, error: userError } = await getOrCreateUser(userId);
 
     if (userError || !user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return NextResponse.json({ error: userError || 'User not found' }, { status: 404 });
     }
 
     // TODO: Re-enable CV limit for free tier
