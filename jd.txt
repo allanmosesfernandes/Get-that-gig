@@ -1,0 +1,30 @@
+About the job
+We are hiring for a talented Frontend Developer with UX/UI Design skills. The ideal candidate will be responsible for designing, developing, testing, and debugging responsive web and mobile applications for the company.
+
+
+Hard Skills
+
+Extensive experience with React.js, Next.js, and TypeScript
+Strong proficiency in HTML5, CSS3, and modern responsive design
+Proven experience building and maintaining design systems using MUI (Material UI)
+Experience using Figma
+Deep understanding of UX principles, accessibility, and component-driven architecture
+Experience integrating front-end applications with APIs
+Strong knowledge of version control and front-end best practices
+
+
+Soft Skills
+
+Creative problem-solver with the ability to design elegant solutions to complex workflows
+Strong team player who collaborates effectively with designers, developers, and stakeholders
+Excellent communication skills with both technical and non-technical audiences
+High attention to detail and commitment to quality
+Proactive, self-driven, and comfortable taking ownership of features and systems
+Ability to mentor others and contribute to technical direction
+
+
+Nice to Have
+
+Experience building internal tools, dashboards, or enterprise applications
+Familiarity with testing frameworks, agile workflows and performance optimization
+Experience evolving or scaling a shared design system
